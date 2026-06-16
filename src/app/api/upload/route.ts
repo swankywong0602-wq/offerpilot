@@ -1,10 +1,6 @@
 // ========== 简历上传 API ==========
 
 import { NextRequest, NextResponse } from 'next/server';
-// @ts-ignore
-import pdfParse from 'pdf-parse';
-// @ts-ignore
-import mammoth from 'mammoth';
 import { generateId } from '@/lib/db';
 
 export async function POST(req: NextRequest) {
@@ -18,23 +14,42 @@ export async function POST(req: NextRequest) {
 
     const fileName = file.name;
     const fileType = fileName.split('.').pop()?.toLowerCase();
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
     let content = '';
 
+    // 解析文本
+    if (fileType === 'txt') {
+      content = buffer.toString('utf-8');
+    }
     // 解析 PDF
-    if (fileType === 'pdf') {
-      const parsed = await pdfParse(buffer);
-      content = parsed.text;
+    else if (fileType === 'pdf') {
+      try {
+        const pdfModule = await import('pdf-parse');
+        const pdfParse = (pdfModule as any).default || pdfModule;
+        const parsed = await pdfParse(buffer);
+        content = parsed.text;
+      } catch {
+        return NextResponse.json(
+          { error: 'PDF 解析失败，请确认文件未加密且格式正确' },
+          { status: 400 }
+        );
+      }
     }
     // 解析 DOCX
     else if (fileType === 'docx') {
-      const result = await mammoth.extractRawText({ buffer });
-      content = result.value;
-    }
-    // 纯文本直接读
-    else if (fileType === 'txt') {
-      content = buffer.toString('utf-8');
+      try {
+        const mammothModule = await import('mammoth');
+        const mammoth = (mammothModule as any).default || mammothModule;
+        const result = await mammoth.extractRawText({ buffer });
+        content = result.value;
+      } catch {
+        return NextResponse.json(
+          { error: 'DOCX 解析失败，请确认文件格式正确' },
+          { status: 400 }
+        );
+      }
     }
     else {
       return NextResponse.json({ error: '仅支持 PDF、DOCX、TXT 格式' }, { status: 400 });
@@ -51,7 +66,7 @@ export async function POST(req: NextRequest) {
       resume: {
         id: resumeId,
         name: fileName,
-        content: content.slice(0, 5000), // 限制长度
+        content: content.slice(0, 5000),
         fileName,
         uploadedAt: new Date().toISOString(),
       },
