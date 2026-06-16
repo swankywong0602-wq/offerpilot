@@ -3,15 +3,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateId } from '@/lib/db';
 
-// 用 pdfjs-dist 解析 PDF（纯 JS，Vercel 兼容）
-async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
-  const pdfjsLib = await import('pdfjs-dist');
+// 用 pdfjs-dist legacy 版本解析 PDF（不需要 canvas，Vercel 兼容）
+async function extractPdfText(data: Uint8Array): Promise<string> {
+  // 使用 legacy build，不依赖 canvas 原生模块
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
 
   const doc = await pdfjsLib.getDocument({
-    data: new Uint8Array(buffer),
+    data,
     useWorkerFetch: false,
     isEvalSupported: false,
     useSystemFonts: false,
+    disableFontFace: true,
   }).promise;
 
   const pageTexts: string[] = [];
@@ -47,10 +49,10 @@ export async function POST(req: NextRequest) {
     if (fileType === 'txt') {
       content = buffer.toString('utf-8');
     }
-    // 解析 PDF（pdfjs-dist，纯 JS，Vercel 兼容）
+    // PDF — pdfjs-dist legacy build，纯 JS，Vercel 完全兼容
     else if (fileType === 'pdf') {
       try {
-        content = await extractPdfText(arrayBuffer);
+        content = await extractPdfText(new Uint8Array(arrayBuffer));
       } catch (e) {
         console.error('PDF parse error:', e);
         return NextResponse.json(
@@ -59,7 +61,7 @@ export async function POST(req: NextRequest) {
         );
       }
     }
-    // 解析 DOCX（mammoth，纯 JS）
+    // DOCX — mammoth，纯 JS
     else if (fileType === 'docx') {
       try {
         const mammothModule = await import('mammoth');
