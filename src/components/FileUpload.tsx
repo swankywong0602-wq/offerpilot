@@ -6,66 +6,71 @@ interface Props {
   onUploaded: (resume: { id: string; name: string; content: string }) => void;
 }
 
+// 简单的纯文本 PDF 解析——从二进制中提取可读文本
+// 不依赖任何外部库，完全在浏览器运行
+function extractPdfTextFromBinary(buffer: ArrayBuffer): string {
+  const uint8 = new Uint8Array(buffer);
+  const text = new TextDecoder('utf-8').decode(uint8);
+
+  // 尝试提取 PDF 流中的文本
+  const parts: string[] = [];
+
+  // 匹配 BT...ET 块（PDF 文本块）
+  const btRegex = /BT\s*([\s\S]*?)\s*ET/g;
+  let match;
+  while ((match = btRegex.exec(text)) !== null) {
+    const block = match[1];
+    // 提取 Tj、TJ、'、" 操作符中的文本
+    const tjRegex = /\(([^)]*)\)\s*Tj/g;
+    let tjMatch;
+    while ((tjMatch = tjRegex.exec(block)) !== null) {
+      const str = tjMatch[1];
+      if (str && !/^[.\-+\d\s]*$/.test(str) && str.length > 1) {
+        parts.push(str);
+      }
+    }
+  }
+
+  if (parts.length > 20) {
+    return parts.join(' ');
+  }
+
+  // fallback: 从原始文本中提取可打印字符序列
+  const printable = text.replace(/[^\x20-\x7E一-鿿　-〿＀-￯\n\r]/g, '');
+  const lines = printable.split('\n').filter(l => {
+    const trimmed = l.trim();
+    return trimmed.length > 10 && !/^[.\-+\d\s]*$/.test(trimmed);
+  });
+
+  if (lines.length > 5) {
+    return lines.join('\n');
+  }
+
+  return printable.slice(0, 5000);
+}
+
+// 简单的 DOCX 文本提取——DOCX 本质是 ZIP 包
+async function extractDocxText(buffer: ArrayBuffer): Promise<string> {
+  // DOCX 的 XML 内容通常可以直接从二进制中提取
+  const uint8 = new Uint8Array(buffer);
+  const text = new TextDecoder('utf-8').decode(uint8);
+
+  // 提取 <w:t> 标签中的文本
+  const wtRegex = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+  const parts: string[] = [];
+  let match;
+  while ((match = wtRegex.exec(text)) !== null) {
+    if (match[1].trim()) parts.push(match[1]);
+  }
+
+  return parts.join('');
+}
+
 export default function FileUpload({ onUploaded }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
-
-  // 在浏览器端解析 PDF
-  const parsePdfInBrowser = async (arrayBuffer: ArrayBuffer): Promise<string> => {
-    setStatus('正在加载 PDF 解析引擎...');
-
-    // 从 CDN 动态加载 pdfjs-dist，完全在浏览器运行
-    // CDN 动态加载，完全在浏览器运行，不经过 Vercel 服务器
-    const pdfjsModule = await import(
-      'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.mjs'
-    );
-    const pdfjsLib = pdfjsModule as any;
-
-    // 配置 worker
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs';
-
-    setStatus('正在解析 PDF...');
-    const doc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
-
-    const pageTexts: string[] = [];
-    for (let i = 1; i <= doc.numPages; i++) {
-      setStatus(`解析第 ${i}/${doc.numPages} 页...`);
-      const page = await doc.getPage(i);
-      const textContent = await page.getTextContent();
-      const text = textContent.items
-        .map((item: any) => item.str || '')
-        .join(' ');
-      pageTexts.push(text);
-    }
-
-    return pageTexts.join('\n');
-  };
-
-  // 在浏览器端解析 DOCX
-  const parseDocxInBrowser = async (arrayBuffer: ArrayBuffer): Promise<string> => {
-    setStatus('正在加载 DOCX 解析引擎...');
-    const mammoth = (window as any).__mammoth;
-    if (mammoth) {
-      const result = await mammoth.extractRawText({ arrayBuffer });
-      return result.value;
-    }
-
-    // fallback: 从 CDN 加载
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js';
-      script.onload = async () => {
-        const m = (window as any).mammoth;
-        const result = await m.extractRawText({ arrayBuffer });
-        resolve(result.value);
-      };
-      script.onerror = () => reject(new Error('DOCX 解析引擎加载失败'));
-      document.head.appendChild(script);
-    });
-  };
 
   const handleFile = useCallback(async (file: File) => {
     setError('');
@@ -80,12 +85,13 @@ export default function FileUpload({ onUploaded }: Props) {
       let content = '';
 
       if (fileType === 'txt') {
-        const buffer = new Uint8Array(arrayBuffer);
-        content = new TextDecoder('utf-8').decode(buffer);
+        content = new TextDecoder('utf-8').decode(new Uint8Array(arrayBuffer));
       } else if (fileType === 'pdf') {
-        content = await parsePdfInBrowser(arrayBuffer);
+        setStatus('正在解析 PDF...');
+        content = extractPdfTextFromBinary(arrayBuffer);
       } else if (fileType === 'docx') {
-        content = await parseDocxInBrowser(arrayBuffer);
+        setStatus('正在解析 DOCX...');
+        content = await extractDocxText(arrayBuffer);
       } else {
         setError('仅支持 PDF、DOCX、TXT 格式');
         setIsUploading(false);
@@ -93,12 +99,11 @@ export default function FileUpload({ onUploaded }: Props) {
       }
 
       if (!content.trim()) {
-        setError('未能从文件中提取到文本内容，请确认文件格式正确');
+        setError('未能从文件中提取到文本内容。请确保文件是文本型 PDF（非扫描图片），或直接上传 TXT 格式。');
         setIsUploading(false);
         return;
       }
 
-      // 发送解析后的文本到后端
       setStatus('正在保存...');
       const res = await fetch('/api/upload', {
         method: 'POST',
@@ -164,6 +169,7 @@ export default function FileUpload({ onUploaded }: Props) {
             <div>
               <p className="text-gray-700 font-medium">拖拽简历文件到此处，或点击上传</p>
               <p className="text-gray-400 text-sm mt-1">支持 PDF、DOCX、TXT 格式</p>
+              <p className="text-gray-300 text-xs mt-2">⚠ 扫描图片型 PDF 无法识别，请上传文本型 PDF</p>
             </div>
           </div>
         )}
