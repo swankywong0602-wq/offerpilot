@@ -10,18 +10,100 @@ export default function FileUpload({ onUploaded }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState('');
+  const [status, setStatus] = useState('');
+
+  // 在浏览器端解析 PDF
+  const parsePdfInBrowser = async (arrayBuffer: ArrayBuffer): Promise<string> => {
+    setStatus('正在加载 PDF 解析引擎...');
+
+    // 从 CDN 动态加载 pdfjs-dist，完全在浏览器运行
+    // CDN 动态加载，完全在浏览器运行，不经过 Vercel 服务器
+    const pdfjsModule = await import(
+      'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.mjs'
+    );
+    const pdfjsLib = pdfjsModule as any;
+
+    // 配置 worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs';
+
+    setStatus('正在解析 PDF...');
+    const doc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+
+    const pageTexts: string[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      setStatus(`解析第 ${i}/${doc.numPages} 页...`);
+      const page = await doc.getPage(i);
+      const textContent = await page.getTextContent();
+      const text = textContent.items
+        .map((item: any) => item.str || '')
+        .join(' ');
+      pageTexts.push(text);
+    }
+
+    return pageTexts.join('\n');
+  };
+
+  // 在浏览器端解析 DOCX
+  const parseDocxInBrowser = async (arrayBuffer: ArrayBuffer): Promise<string> => {
+    setStatus('正在加载 DOCX 解析引擎...');
+    const mammoth = (window as any).__mammoth;
+    if (mammoth) {
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      return result.value;
+    }
+
+    // fallback: 从 CDN 加载
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js';
+      script.onload = async () => {
+        const m = (window as any).mammoth;
+        const result = await m.extractRawText({ arrayBuffer });
+        resolve(result.value);
+      };
+      script.onerror = () => reject(new Error('DOCX 解析引擎加载失败'));
+      document.head.appendChild(script);
+    });
+  };
 
   const handleFile = useCallback(async (file: File) => {
     setError('');
     setIsUploading(true);
+    setStatus('正在读取文件...');
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
+      const arrayBuffer = await file.arrayBuffer();
+      const fileName = file.name;
+      const fileType = fileName.split('.').pop()?.toLowerCase();
 
+      let content = '';
+
+      if (fileType === 'txt') {
+        const buffer = new Uint8Array(arrayBuffer);
+        content = new TextDecoder('utf-8').decode(buffer);
+      } else if (fileType === 'pdf') {
+        content = await parsePdfInBrowser(arrayBuffer);
+      } else if (fileType === 'docx') {
+        content = await parseDocxInBrowser(arrayBuffer);
+      } else {
+        setError('仅支持 PDF、DOCX、TXT 格式');
+        setIsUploading(false);
+        return;
+      }
+
+      if (!content.trim()) {
+        setError('未能从文件中提取到文本内容，请确认文件格式正确');
+        setIsUploading(false);
+        return;
+      }
+
+      // 发送解析后的文本到后端
+      setStatus('正在保存...');
       const res = await fetch('/api/upload', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: content.slice(0, 8000), fileName }),
       });
 
       const data = await res.json();
@@ -32,10 +114,12 @@ export default function FileUpload({ onUploaded }: Props) {
       }
 
       onUploaded(data.resume);
-    } catch {
-      setError('网络错误，请重试');
+    } catch (err) {
+      console.error('解析失败:', err);
+      setError('文件解析失败，请确认文件未损坏');
     } finally {
       setIsUploading(false);
+      setStatus('');
     }
   }, [onUploaded]);
 
@@ -68,7 +152,7 @@ export default function FileUpload({ onUploaded }: Props) {
         {isUploading ? (
           <div className="space-y-3">
             <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto" />
-            <p className="text-gray-500">正在解析简历...</p>
+            <p className="text-gray-500">{status || '正在解析简历...'}</p>
           </div>
         ) : (
           <div className="space-y-3">
