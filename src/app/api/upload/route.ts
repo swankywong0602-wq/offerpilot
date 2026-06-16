@@ -3,6 +3,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateId } from '@/lib/db';
 
+// 用 pdfjs-dist 解析 PDF（纯 JS，Vercel 兼容）
+async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
+  const pdfjsLib = await import('pdfjs-dist');
+
+  const doc = await pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    useSystemFonts: false,
+  }).promise;
+
+  const pageTexts: string[] = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const textContent = await page.getTextContent();
+    const text = textContent.items
+      .map((item: any) => item.str || '')
+      .join(' ');
+    pageTexts.push(text);
+  }
+
+  return pageTexts.join('\n');
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -19,32 +43,31 @@ export async function POST(req: NextRequest) {
 
     let content = '';
 
-    // 解析文本
+    // 纯文本直接读
     if (fileType === 'txt') {
       content = buffer.toString('utf-8');
     }
-    // 解析 PDF
+    // 解析 PDF（pdfjs-dist，纯 JS，Vercel 兼容）
     else if (fileType === 'pdf') {
       try {
-        const pdfModule = await import('pdf-parse');
-        const pdfParse = (pdfModule as any).default || pdfModule;
-        const parsed = await pdfParse(buffer);
-        content = parsed.text;
-      } catch {
+        content = await extractPdfText(arrayBuffer);
+      } catch (e) {
+        console.error('PDF parse error:', e);
         return NextResponse.json(
           { error: 'PDF 解析失败，请确认文件未加密且格式正确' },
           { status: 400 }
         );
       }
     }
-    // 解析 DOCX
+    // 解析 DOCX（mammoth，纯 JS）
     else if (fileType === 'docx') {
       try {
         const mammothModule = await import('mammoth');
         const mammoth = (mammothModule as any).default || mammothModule;
         const result = await mammoth.extractRawText({ buffer });
         content = result.value;
-      } catch {
+      } catch (e) {
+        console.error('DOCX parse error:', e);
         return NextResponse.json(
           { error: 'DOCX 解析失败，请确认文件格式正确' },
           { status: 400 }
