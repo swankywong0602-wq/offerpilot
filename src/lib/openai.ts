@@ -1,8 +1,9 @@
 // ========== OpenAI API 调用封装 ==========
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const env = (typeof process !== 'undefined' ? process.env as Record<string,string|undefined> : {}) || {};
+const OPENAI_API_KEY = env.OPENAI_API_KEY || '';
+const OPENAI_BASE_URL = env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+const OPENAI_MODEL = env.OPENAI_MODEL || 'gpt-4o-mini';
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -79,7 +80,15 @@ function simulateResponse(messages: ChatMessage[]): string {
   }
 
   if (lastMsg.includes('优化') || lastMsg.includes('重写')) {
-    return '优化后的简历内容已生成，包含以下改进：\n\n1. 量化了项目成果（如"用户留存率提升20%"）\n2. 强化了技能关键词密度（金融科技、数据分析、AI应用）\n3. 调整了排版层级，核心信息更突出\n4. 增加了动词开头的行动描述，更具冲击力\n\n（接入 OpenAI API 后将获得完整优化版本）';
+    return JSON.stringify({
+      optimizedContent: '优化后的简历内容已生成，包含以下改进：\n\n1. 量化了项目成果（如"用户留存率提升20%"）\n2. 强化了技能关键词密度（金融科技、数据分析、AI应用）\n3. 调整了排版层级，核心信息更突出\n4. 增加了动词开头的行动描述，更具冲击力\n\n（接入 OpenAI API 后将获得完整优化版本）',
+      changes: [
+        '量化了项目成果（如"用户留存率提升20%"）',
+        '强化了技能关键词密度（金融科技、数据分析、AI应用）',
+        '调整了排版层级，核心信息更突出',
+        '增加了动词开头的行动描述，更具冲击力',
+      ],
+    });
   }
 
   if (lastMsg.includes('面试') || lastMsg.includes('问题')) {
