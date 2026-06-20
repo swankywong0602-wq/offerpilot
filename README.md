@@ -16,16 +16,13 @@
 - **前端**: Next.js 16 + React + Tailwind CSS
 - **数据库**: SQLite（sql.js，纯 WebAssembly，无需编译）
 - **AI**: OpenAI API（兼容接口）
-- **部署**: Vercel（一键部署）
+- **部署**: EdgeOne Pages（腾讯云，国内可直连）| Cloudflare Workers（全球加速）
 
 ## 快速开始
 
 ```bash
 # 安装依赖
 npm install
-
-# 配置环境变量
-# 编辑 .env.local，填入 OPENAI_API_KEY
 
 # 启动开发服务器
 npm run dev
@@ -36,27 +33,32 @@ open http://localhost:3000
 
 ## 配置 API Key
 
-1. 注册 [OpenAI Platform](https://platform.openai.com/)
+1. 注册 [DeepSeek Platform](https://platform.deepseek.com/)（国内可直接注册，送 500 万 tokens）
 2. 创建 API Key
 3. 编辑 `.env.local`：
 
 ```
 OPENAI_API_KEY=sk-your-key-here
+OPENAI_BASE_URL=https://api.deepseek.com/v1
+OPENAI_MODEL=deepseek-chat
 ```
 
 **没有 API Key 也能跑**——内置了模拟数据，不影响开发调试。
 
-## 部署到 Vercel
+## 免费部署到国内
 
-```bash
-# 安装 Vercel CLI
-npm i -g vercel
+> 部署到 [EdgeOne Pages](https://pages.edgeone.ai)（腾讯云边缘加速平台），
+> 免费提供 `*.edgeone.app` 域名，国内 CDN 加速直接可访问！
 
-# 部署
-vercel
-```
-
-或直接关联 GitHub 仓库在 [vercel.com](https://vercel.com) 一键导入。
+1. 推送代码到 GitHub
+2. 打开 [pages.edgeone.ai](https://pages.edgeone.ai)，用 GitHub 登录
+3. 点击 **Import Repository** → 选择 `offerpilot`
+4. 自动检测 Next.js，无需修改任何配置
+5. 在控制台设置环境变量：
+   - `OPENAI_API_KEY` = 你的 DeepSeek API Key
+   - `OPENAI_BASE_URL` = `https://api.deepseek.com/v1`
+   - `OPENAI_MODEL` = `deepseek-chat`
+6. 点击 **Deploy** → 获得 `xxx.edgeone.app` 域名，国内秒开！
 
 ## 项目结构
 
